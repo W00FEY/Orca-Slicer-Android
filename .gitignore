@@ -8,3 +8,4 @@ local.properties
 *.iml
 .cxx/
 orca-slicer-android-debug.apk
+orca-slicer-android.apk

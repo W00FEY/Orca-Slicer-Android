@@ -32,7 +32,8 @@ with the same profiles. The touch UI is new and built for phones like the Pixel 
    or from **Releases** when there is a tagged build.
 2. On the phone, open the APK and allow your browser or file manager to install unknown apps
    when Android asks.
-3. Open **Orca Slicer**, pick your printer brand(s) and printer, then import a model.
+3. Open **Orca Slicer**, pick your printer brand(s) and printer, then import a model, or tap
+   **Try a 3DBenchy** on the empty plate.
 
 The APK targets 64-bit ARM (`arm64-v8a`), which covers the Pixel 9 family and practically every
 current Android phone. It needs Android 10 or newer.
@@ -74,6 +75,14 @@ To also run it on an x86_64 emulator, build the dependencies for that ABI as wel
 
 The GitHub Actions workflow does the same steps and caches the dependency build, so only the
 first run is slow.
+
+### Testing the engine without a phone
+
+`tests/host/run.sh` builds the same engine and JNI bridge for Linux and drives
+it from Java through the app's JNI entry points: it loads the Prusa and Creality
+profiles, imports and transforms a model, slices it and checks the G-code. Pass
+a printer name to try another profile, e.g.
+`tests/host/run.sh "Creality Ender-3 V3 SE 0.4 nozzle"`.
 
 ### Updating OrcaSlicer
 

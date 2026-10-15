@@ -71,6 +71,7 @@ android_dep(TBB
     GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
     GIT_TAG v2021.5.0
     GIT_SHALLOW TRUE
+    PATCH_COMMAND ${PATCH} ${CMAKE_CURRENT_LIST_DIR}/patches/tbb-android.patch
     CMAKE_ARGS
         -DTBB_BUILD_SHARED=OFF
         -DTBB_TEST=OFF
@@ -130,9 +131,11 @@ ExternalProject_Add(dep_GMP
     URL https://github.com/SoftFever/OrcaSlicer_deps/releases/download/gmp-6.2.1/gmp-6.2.1.tar.bz2
     URL_HASH SHA256=eae9326beb4158c386e39a356818031bd28f3124cf915f8c5b1dc4c7a36b4d7c
     DOWNLOAD_DIR ${DEP_DOWNLOAD_DIR}/GMP
+    # Keep archive timestamps so make doesn't try to re-run automake.
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     PATCH_COMMAND ${PATCH} ${ORCA_DEPS_DIR}/GMP/0001-GMP_GCC15.patch
     BUILD_IN_SOURCE ON
-    CONFIGURE_COMMAND ${AT_ENV} ./configure --host=${ANDROID_TRIPLE} --prefix=${DESTDIR}
+    CONFIGURE_COMMAND ${AT_ENV} ./configure ${AT_HOST_ARG} --prefix=${DESTDIR}
         --enable-cxx --enable-static --disable-shared --with-pic
     BUILD_COMMAND ${AT_ENV} make -j${NPROC}
     INSTALL_COMMAND ${AT_ENV} make install
@@ -144,9 +147,11 @@ ExternalProject_Add(dep_MPFR
         https://www.mpfr.org/mpfr-4.2.2/mpfr-4.2.2.tar.bz2
     URL_HASH SHA256=9ad62c7dc910303cd384ff8f1f4767a655124980bb6d8650fe62c815a231bb7b
     DOWNLOAD_DIR ${DEP_DOWNLOAD_DIR}/MPFR
+    # Keep archive timestamps so make doesn't try to re-run automake.
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     DEPENDS dep_GMP
     BUILD_IN_SOURCE ON
-    CONFIGURE_COMMAND ${AT_ENV} ./configure --host=${ANDROID_TRIPLE} --prefix=${DESTDIR}
+    CONFIGURE_COMMAND ${AT_ENV} ./configure ${AT_HOST_ARG} --prefix=${DESTDIR}
         --with-gmp=${DESTDIR} --enable-static --disable-shared --with-pic
     BUILD_COMMAND ${AT_ENV} make -j${NPROC}
     INSTALL_COMMAND ${AT_ENV} make install
@@ -172,12 +177,11 @@ ExternalProject_Add(dep_OpenSSL
     GIT_SHALLOW TRUE
     DOWNLOAD_DIR ${DEP_DOWNLOAD_DIR}/OpenSSL
     BUILD_IN_SOURCE ON
-    CONFIGURE_COMMAND env "PATH=${NDK_BIN}:$ENV{PATH}" "ANDROID_NDK_ROOT=${ANDROID_NDK}" "ANDROID_NDK_HOME=${ANDROID_NDK}"
-        ./Configure ${OPENSSL_TARGET} -D__ANDROID_API__=${ANDROID_API_LEVEL}
+    CONFIGURE_COMMAND ${OPENSSL_ENV} ${OPENSSL_CONFIGURE}
         --prefix=${DESTDIR} --openssldir=${DESTDIR}
         no-shared no-asm no-ssl3-method no-dynamic-engine no-tests
-    BUILD_COMMAND env "PATH=${NDK_BIN}:$ENV{PATH}" "ANDROID_NDK_ROOT=${ANDROID_NDK}" make -j${NPROC} build_libs
-    INSTALL_COMMAND env "PATH=${NDK_BIN}:$ENV{PATH}" "ANDROID_NDK_ROOT=${ANDROID_NDK}" make install_dev
+    BUILD_COMMAND ${OPENSSL_ENV} make -j${NPROC} build_libs
+    INSTALL_COMMAND ${OPENSSL_ENV} make install_dev
 )
 
 # ---------------------------------------------------------------- OpenCV (core/imgproc only)

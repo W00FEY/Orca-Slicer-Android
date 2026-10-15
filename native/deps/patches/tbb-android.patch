@@ -1,0 +1,12 @@
+--- a/cmake/compilers/Clang.cmake	2026-10-15 02:13:14.265978032 +0000
++++ b/cmake/compilers/Clang.cmake	2026-10-15 02:13:14.270080954 +0000
+@@ -39,7 +39,8 @@
+ set(TBB_TEST_WARNING_FLAGS -Wshadow -Wcast-qual -Woverloaded-virtual -Wnon-virtual-dtor)
+ 
+ # Ignore -Werror set through add_compile_options() or added to CMAKE_CXX_FLAGS if TBB_STRICT is disabled.
+-if (NOT TBB_STRICT AND COMMAND tbb_remove_compile_flag)
++# Android: the NDK adds -Werror=format-security, which this would mangle into "=format-security".
++if (NOT TBB_STRICT AND NOT ANDROID AND COMMAND tbb_remove_compile_flag)
+     tbb_remove_compile_flag(-Werror)
+ endif()
+ 

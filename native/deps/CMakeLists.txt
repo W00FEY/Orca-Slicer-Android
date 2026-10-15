@@ -20,9 +20,8 @@ endif()
 
 project(OrcaSlicerAndroidDeps NONE)
 
-if(NOT ANDROID)
-    message(FATAL_ERROR "Configure this project with the Android NDK toolchain file.")
-endif()
+# Without the NDK toolchain this builds for the host (Linux), which is used to
+# run the engine's JNI bridge in desktop tests (see tests/host).
 
 enable_language(C)
 enable_language(CXX)
@@ -50,35 +49,42 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Settings for autotools / Makefile based projects (GMP, MPFR, OpenSSL).
-set(NDK_BIN "${ANDROID_TOOLCHAIN_ROOT}/bin")
-if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(ANDROID_TRIPLE aarch64-linux-android)
-    set(OPENSSL_TARGET android-arm64)
-elseif(ANDROID_ABI STREQUAL "x86_64")
-    set(ANDROID_TRIPLE x86_64-linux-android)
-    set(OPENSSL_TARGET android-x86_64)
-else()
-    message(FATAL_ERROR "Unsupported ANDROID_ABI: ${ANDROID_ABI} (use arm64-v8a or x86_64)")
-endif()
-set(ANDROID_API_LEVEL ${ANDROID_PLATFORM_LEVEL})
-set(AT_CC  "${NDK_BIN}/${ANDROID_TRIPLE}${ANDROID_API_LEVEL}-clang")
-set(AT_CXX "${NDK_BIN}/${ANDROID_TRIPLE}${ANDROID_API_LEVEL}-clang++")
-set(AT_ENV env
-    "PATH=${NDK_BIN}:$ENV{PATH}"
-    "CC=${AT_CC}" "CXX=${AT_CXX}"
-    "AR=${NDK_BIN}/llvm-ar" "RANLIB=${NDK_BIN}/llvm-ranlib"
-    "STRIP=${NDK_BIN}/llvm-strip" "NM=${NDK_BIN}/llvm-nm"
-    "CFLAGS=-O2 -fPIC -DNDEBUG" "CXXFLAGS=-O2 -fPIC -DNDEBUG"
+set(AT_FLAGS "CFLAGS=-O2 -fPIC -DNDEBUG" "CXXFLAGS=-O2 -fPIC -DNDEBUG"
     # Skip texinfo documentation, which would otherwise require makeinfo.
     "MAKEINFO=true")
+if(ANDROID)
+    set(NDK_BIN "${ANDROID_TOOLCHAIN_ROOT}/bin")
+    if(ANDROID_ABI STREQUAL "arm64-v8a")
+        set(ANDROID_TRIPLE aarch64-linux-android)
+        set(OPENSSL_TARGET android-arm64)
+    elseif(ANDROID_ABI STREQUAL "x86_64")
+        set(ANDROID_TRIPLE x86_64-linux-android)
+        set(OPENSSL_TARGET android-x86_64)
+    else()
+        message(FATAL_ERROR "Unsupported ANDROID_ABI: ${ANDROID_ABI} (use arm64-v8a or x86_64)")
+    endif()
+    set(ANDROID_API_LEVEL ${ANDROID_PLATFORM_LEVEL})
+    set(AT_ENV env
+        "PATH=${NDK_BIN}:$ENV{PATH}"
+        "CC=${NDK_BIN}/${ANDROID_TRIPLE}${ANDROID_API_LEVEL}-clang"
+        "CXX=${NDK_BIN}/${ANDROID_TRIPLE}${ANDROID_API_LEVEL}-clang++"
+        "AR=${NDK_BIN}/llvm-ar" "RANLIB=${NDK_BIN}/llvm-ranlib"
+        "STRIP=${NDK_BIN}/llvm-strip" "NM=${NDK_BIN}/llvm-nm"
+        ${AT_FLAGS})
+    set(AT_HOST_ARG --host=${ANDROID_TRIPLE})
+    set(OPENSSL_ENV env "PATH=${NDK_BIN}:$ENV{PATH}" "ANDROID_NDK_ROOT=${ANDROID_NDK}" "ANDROID_NDK_HOME=${ANDROID_NDK}")
+    set(OPENSSL_CONFIGURE ./Configure ${OPENSSL_TARGET} -D__ANDROID_API__=${ANDROID_API_LEVEL})
+else()
+    set(AT_ENV env "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}" ${AT_FLAGS})
+    set(AT_HOST_ARG "")
+    set(OPENSSL_ENV env "CC=${CMAKE_C_COMPILER}")
+    set(OPENSSL_CONFIGURE ./config)
+endif()
 
 # Arguments forwarded to every CMake based dependency.
 set(DEP_CMAKE_ARGS
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-    -DANDROID_ABI=${ANDROID_ABI}
-    -DANDROID_PLATFORM=${ANDROID_PLATFORM}
-    -DANDROID_STL=${ANDROID_STL}
     -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
     -DCMAKE_INSTALL_PREFIX=${DESTDIR}
     -DCMAKE_PREFIX_PATH=${DESTDIR}
@@ -88,6 +94,11 @@ set(DEP_CMAKE_ARGS
     -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
     -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
 )
+if(ANDROID)
+    list(APPEND DEP_CMAKE_ARGS -DANDROID_ABI=${ANDROID_ABI} -DANDROID_PLATFORM=${ANDROID_PLATFORM} -DANDROID_STL=${ANDROID_STL})
+else()
+    list(APPEND DEP_CMAKE_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+endif()
 
 function(android_dep name)
     cmake_parse_arguments(P "" "" "CMAKE_ARGS" ${ARGN})

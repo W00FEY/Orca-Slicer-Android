@@ -58,13 +58,17 @@ add_compile_options(-fsigned-char -Wno-reorder -Werror=return-type
     -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-label
     -Wno-unused-local-typedefs -Wno-sign-compare -Wno-misleading-indentation -Wno-switch
     -Wno-ignored-attributes -Wno-deprecated-declarations -Wno-error=enum-constexpr-conversion
-    -Wno-unknown-pragmas -Wno-missing-template-arg-list-after-template-kw)
+    -Wno-unknown-pragmas -Wno-unknown-warning-option)
 
 set(LIBDIR "${ORCA_SOURCE_DIR}/src")
 set(LIBDIR_BIN "${CMAKE_CURRENT_BINARY_DIR}/src")
 include_directories(SYSTEM ${LIBDIR})
 include_directories(SYSTEM ${LIBDIR_BIN}/dev-utils/platform)
 include_directories(SYSTEM ${LIBDIR}/libigl)
+
+# Used by Orca's CMake files to remap MSVC build configurations; nothing to do here.
+function(slic3r_remap_configs targets from_Cfg to_Cfg)
+endfunction()
 
 # ---------------------------------------------------------------- third-party packages
 set(Boost_USE_STATIC_LIBS ON)
@@ -116,6 +120,7 @@ add_subdirectory(${LIBDIR}/libslic3r ${LIBDIR_BIN}/libslic3r)
 add_library(orca_jni SHARED
     jni/OrcaEngine.cpp
     jni/JniUtils.cpp
+    jni/NanoSvg.cpp
 )
 target_include_directories(orca_jni PRIVATE ${LIBDIR} ${LIBDIR_BIN}/libslic3r)
 target_link_libraries(orca_jni PRIVATE libslic3r boost_libs android log)

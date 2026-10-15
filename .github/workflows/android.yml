@@ -1,0 +1,70 @@
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      ABI: arm64-v8a
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install NDK and CMake
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;$(cat NDK_VERSION)" "cmake;3.31.6" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+
+      - name: Fetch OrcaSlicer sources
+        run: scripts/fetch_orca.sh
+
+      - name: Restore dependency cache
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/deps-${{ env.ABI }}/prefix
+          key: deps-${{ env.ABI }}-${{ hashFiles('native/deps/**', 'ORCA_VERSION', 'NDK_VERSION') }}
+
+      - name: Build dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          scripts/build_deps.sh "$ABI"
+          # Keep only the install prefix; the build trees are several GB.
+          find "build/deps-$ABI" -mindepth 1 -maxdepth 1 ! -name prefix -exec rm -rf {} +
+
+      - name: Save dependency cache
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/deps-${{ env.ABI }}/prefix
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
+
+      - name: Build APK
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-slicer-android-${{ env.ABI }}
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk

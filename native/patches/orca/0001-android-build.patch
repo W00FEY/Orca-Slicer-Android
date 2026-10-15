@@ -11,3 +11,15 @@ index 9b67d7ab..e32b56e6 100644
          target_link_libraries(libslic3r PRIVATE fontconfig)
      endif()
  endif()
+diff --git a/src/libslic3r/LocalesUtils.cpp b/src/libslic3r/LocalesUtils.cpp
+index d3210723..5379b53e 100644
+--- a/src/libslic3r/LocalesUtils.cpp
++++ b/src/libslic3r/LocalesUtils.cpp
+@@ -3,6 +3,7 @@
+ #ifdef _WIN32
+     #include <charconv>
+ #endif
++#include <sstream>
+ #include <stdexcept>
+ 
+ #include <fast_float/fast_float.h>

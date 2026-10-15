@@ -9,11 +9,15 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 if [ ! -f "$ROOT/build/deps-host/prefix/lib/libtbb.a" ] || [ ! -d "$ROOT/build/deps-host/prefix/lib/cmake" ]; then
     cmake -S "$ROOT/native/deps" -B "$ROOT/build/deps-host" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
         -DORCA_SOURCE_DIR="$ROOT/third_party/OrcaSlicer"
     cmake --build "$ROOT/build/deps-host" -- -j1
 fi
 
+# Clang, like the NDK (the engine uses some Clang-only warning flags, and GCC-built
+# LTO archives from the dependencies could not be linked by Clang).
 cmake -S "$ROOT/native/engine" -B "$ROOT/build/engine-host" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DORCA_SOURCE_DIR="$ROOT/third_party/OrcaSlicer"
 cmake --build "$ROOT/build/engine-host" --target orca_jni
 

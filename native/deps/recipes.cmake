@@ -43,8 +43,11 @@ android_dep(EXPAT
 android_dep(FREETYPE
     URL https://github.com/SoftFever/orca_deps/releases/download/freetype-2.12.1.tar.gz/freetype-2.12.1.tar.gz
     URL_HASH SHA256=efe71fd4b8246f1b0b1b9bfca13cfff1c9ad85930340c27df469733bbb620938
+    DEPENDS dep_ZLIB
     CMAKE_ARGS
-        -DFT_DISABLE_ZLIB=TRUE
+        # Use the real zlib; FreeType's bundled copy exports clashing zlib symbols.
+        -DFT_DISABLE_ZLIB=FALSE
+        -DFT_REQUIRE_ZLIB=TRUE
         -DFT_DISABLE_BZIP2=TRUE
         -DFT_DISABLE_PNG=TRUE
         -DFT_DISABLE_HARFBUZZ=TRUE

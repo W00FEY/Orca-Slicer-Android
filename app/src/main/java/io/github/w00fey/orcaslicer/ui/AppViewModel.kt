@@ -275,6 +275,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Sample models bundled with OrcaSlicer (resources/handy_models). */
+    fun sampleModels(): List<String> =
+        File(installer.resourcesDir, "handy_models").listFiles()?.map { it.name }?.sorted().orEmpty()
+
+    fun loadSample(name: String) = action("Importing…") {
+        setObjects(OrcaEngine.loadModel(File(installer.resourcesDir, "handy_models/$name")), reloadMeshes = true)
+        markStale()
+    }
+
     private suspend fun copyToCache(uri: Uri): File = withContext(Dispatchers.IO) {
         val resolver = getApplication<Application>().contentResolver
         var name = uri.lastPathSegment?.substringAfterLast('/') ?: "model.stl"

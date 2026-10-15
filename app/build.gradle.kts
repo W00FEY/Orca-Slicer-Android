@@ -87,6 +87,9 @@ val packOrcaResources by tasks.registering(Zip::class) {
     from(File(orcaSourceDir, "resources")) {
         include("profiles/**/*.json")
         include("info/**", "data/**", "flush/**", "printers/**", "custom_gcodes/**", "shape/**")
+        // Sample models offered in the app's menu.
+        include("handy_models/3DBenchy.drc", "handy_models/Voron_Design_Cube_v7.drc", "handy_models/OrcaCube_v2.drc",
+            "handy_models/calicat.drc", "handy_models/Stanford_Bunny.drc")
     }
     archiveFileName.set("orca-resources.zip")
     destinationDirectory.set(layout.buildDirectory.dir("generated/orca-assets"))

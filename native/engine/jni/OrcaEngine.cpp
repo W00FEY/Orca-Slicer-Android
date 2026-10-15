@@ -33,6 +33,7 @@
 #include "nlohmann/json.hpp"
 
 #include "libslic3r/libslic3r.h"
+#include "libslic3r/Exception.hpp"
 #include "libslic3r/AppConfig.hpp"
 #include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
@@ -75,8 +76,16 @@ struct Engine
 };
 
 std::mutex          g_mutex;
-Engine              g_engine;
 Progress            g_progress;
+
+// Created on first use rather than as a global: AppConfig's constructor reads
+// other libslic3r statics, which may not be initialised yet while the shared
+// library is being loaded.
+Engine &engine()
+{
+    static Engine instance;
+    return instance;
+}
 std::atomic<Print*> g_running_print{nullptr};
 
 jstring error_json(JNIEnv *env, const std::string &msg)
@@ -96,9 +105,15 @@ template<class Fn> jstring guarded(JNIEnv *env, Fn &&fn)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     try {
-        if (!g_engine.initialized)
+        if (!engine().initialized)
             return error_json(env, "Engine not initialised");
         return fn();
+    } catch (const SlicingErrors &ex) {
+        // G-code export collects per-object errors and throws them together.
+        std::string msg;
+        for (const SlicingError &e : ex.errors_)
+            msg += (msg.empty() ? "" : "\n") + std::string(e.what());
+        return error_json(env, msg.empty() ? "Slicing failed" : msg);
     } catch (const std::exception &ex) {
         return error_json(env, ex.what());
     } catch (...) {
@@ -108,8 +123,8 @@ template<class Fn> jstring guarded(JNIEnv *env, Fn &&fn)
 
 DynamicPrintConfig current_config()
 {
-    DynamicPrintConfig cfg = g_engine.bundle->full_config();
-    cfg.apply(g_engine.overrides, true);
+    DynamicPrintConfig cfg = engine().bundle->full_config();
+    cfg.apply(engine().overrides, true);
     return cfg;
 }
 
@@ -142,7 +157,7 @@ json preset_list(const PresetCollection &collection, bool only_compatible)
 
 json selection_json()
 {
-    PresetBundle &b   = *g_engine.bundle;
+    PresetBundle &b   = *engine().bundle;
     const auto   cfg  = current_config();
     json         j;
     j["printer"]    = b.printers.get_selected_preset_name();
@@ -152,6 +167,38 @@ json selection_json()
     j["filaments"]  = preset_list(b.filaments, true);
     j["bed"]        = bed_json(cfg);
     return j;
+}
+
+// Selects `wanted` if it is a usable preset, otherwise keeps the current one
+// unless that is the generic default or incompatible, in which case the first
+// compatible system preset is used.
+std::string pick_preset(PresetCollection &col, const std::string &wanted)
+{
+    if (const Preset *p = wanted.empty() ? nullptr : col.find_preset(wanted); p && p->is_compatible && p->is_visible)
+        return p->name;
+    const Preset &cur = col.get_selected_preset();
+    if (!cur.is_default && cur.is_compatible)
+        return cur.name;
+    for (auto it = col.begin(); it != col.end(); ++it)
+        if (it->is_compatible && it->is_visible && !it->is_default)
+            return it->name;
+    return cur.name;
+}
+
+// After a printer change, switch to the process/filament the printer profile
+// recommends, like the desktop app does.
+void select_printer_defaults(PresetBundle &b)
+{
+    const DynamicPrintConfig &printer = b.printers.get_selected_preset().config;
+    b.prints.select_preset_by_name(pick_preset(b.prints, printer.opt_string("default_print_profile")), true);
+    std::string filament;
+    if (auto *opt = printer.option<ConfigOptionStrings>("default_filament_profile"); opt && !opt->values.empty())
+        filament = opt->values.front();
+    filament = pick_preset(b.filaments, filament);
+    b.filaments.select_preset_by_name(filament, true);
+    for (size_t i = 0; i < b.filament_presets.size(); ++i)
+        b.set_filament_preset(i, filament);
+    b.update_compatible(PresetSelectCompatibleType::OnlyIfWasCompatible);
 }
 
 json option_json(const std::string &key, const DynamicPrintConfig &cfg)
@@ -176,14 +223,14 @@ json option_json(const std::string &key, const DynamicPrintConfig &cfg)
     }
     const ConfigOption *opt = cfg.option(key);
     j["value"]              = opt ? opt->serialize() : std::string();
-    j["overridden"]         = g_engine.overrides.has(key);
+    j["overridden"]         = engine().overrides.has(key);
     return j;
 }
 
 json objects_json()
 {
     json out = json::array();
-    for (const ModelObject *obj : g_engine.model.objects) {
+    for (const ModelObject *obj : engine().model.objects) {
         json instances = json::array();
         for (size_t i = 0; i < obj->instances.size(); ++i) {
             const ModelInstance *inst = obj->instances[i];
@@ -209,11 +256,25 @@ json objects_json()
     return out;
 }
 
+// Puts every instance of the object on the bed. ModelObject::ensure_on_bed()
+// shifts all instances together, which leaves a copy with a different scale or
+// rotation floating or sunk.
+void drop_to_bed(ModelObject *obj)
+{
+    for (size_t i = 0; i < obj->instances.size(); ++i) {
+        const double min_z = obj->instance_bounding_box(i).min.z();
+        if (std::abs(min_z) > EPSILON) {
+            ModelInstance *inst = obj->instances[i];
+            inst->set_offset(Z, inst->get_offset(Z) - min_z);
+        }
+    }
+}
+
 ModelInstance *instance_at(int obj_idx, int inst_idx)
 {
-    if (obj_idx < 0 || size_t(obj_idx) >= g_engine.model.objects.size())
+    if (obj_idx < 0 || size_t(obj_idx) >= engine().model.objects.size())
         throw Slic3r::RuntimeError("Invalid object index");
-    ModelObject *obj = g_engine.model.objects[obj_idx];
+    ModelObject *obj = engine().model.objects[obj_idx];
     if (inst_idx < 0 || size_t(inst_idx) >= obj->instances.size())
         throw Slic3r::RuntimeError("Invalid instance index");
     return obj->instances[inst_idx];
@@ -221,15 +282,39 @@ ModelInstance *instance_at(int obj_idx, int inst_idx)
 
 void arrange_model(const DynamicPrintConfig &cfg)
 {
-    if (g_engine.model.objects.empty())
+    if (engine().model.objects.empty())
         return;
     arrangement::ArrangeParams params;
     params.min_obj_distance = scaled(6.);
     params.allow_rotations  = false;
     Points bed = get_bed_shape(cfg);
-    arrange_objects(g_engine.model, bed, params, [](arrangement::ArrangePolygon &) {});
-    for (ModelObject *o : g_engine.model.objects)
-        o->ensure_on_bed();
+    arrange_objects(engine().model, bed, params, [](arrangement::ArrangePolygon &) {});
+    for (ModelObject *o : engine().model.objects)
+        drop_to_bed(o);
+}
+
+// Loads system and user presets. The desktop app only shows printers whose
+// models were ticked in its setup wizard (stored in AppConfig); the Android app
+// installs just the vendors the user picked, so every model they contain is
+// marked as installed here.
+std::unique_ptr<PresetBundle> load_bundle(AppConfig &app_config)
+{
+    auto bundle = std::make_unique<PresetBundle>();
+    bundle->load_presets(app_config, ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
+
+    AppConfig::VendorMap installed;
+    for (const Preset &p : bundle->printers) {
+        if (p.vendor == nullptr)
+            continue;
+        const std::string &model   = p.config.opt_string("printer_model");
+        const std::string &variant = p.config.opt_string("printer_variant");
+        if (!model.empty() && !variant.empty())
+            installed[p.vendor->id][model].insert(variant);
+    }
+    app_config.set_vendors(std::move(installed));
+    bundle->load_installed_printers(app_config);
+    bundle->set_default_suppressed(true);
+    return bundle;
 }
 
 void setup_logging()
@@ -263,11 +348,9 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeInit(JNIEnv *env, jcl
         boost::filesystem::create_directories(boost::filesystem::path(data) / PRESET_SYSTEM_DIR);
         boost::filesystem::create_directories(boost::filesystem::path(data) / "user" / "default");
 
-        g_engine.bundle = std::make_unique<PresetBundle>();
-        g_engine.bundle->load_presets(g_engine.app_config, ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
-        g_engine.bundle->set_default_suppressed(true);
-        g_engine.print       = std::make_unique<Print>();
-        g_engine.initialized = true;
+        engine().bundle = load_bundle(engine().app_config);
+        engine().print       = std::make_unique<Print>();
+        engine().initialized = true;
         return ok_json(env, {{"version", SoftFever_VERSION}});
     } catch (const std::exception &ex) {
         return error_json(env, std::string("Initialisation failed: ") + ex.what());
@@ -279,12 +362,10 @@ JNIEXPORT jstring JNICALL
 Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeReloadPresets(JNIEnv *env, jclass)
 {
     return guarded(env, [&] {
-        std::string printer = g_engine.bundle->printers.get_selected_preset_name();
-        g_engine.bundle     = std::make_unique<PresetBundle>();
-        g_engine.bundle->load_presets(g_engine.app_config, ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
-        g_engine.bundle->set_default_suppressed(true);
-        g_engine.bundle->printers.select_preset_by_name(printer, false);
-        g_engine.bundle->update_compatible(PresetSelectCompatibleType::Always);
+        std::string printer = engine().bundle->printers.get_selected_preset_name();
+        engine().bundle     = load_bundle(engine().app_config);
+        engine().bundle->printers.select_preset_by_name(printer, false);
+        engine().bundle->update_compatible(PresetSelectCompatibleType::Always);
         return ok_json(env);
     });
 }
@@ -296,7 +377,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeListPrinters(JNIEnv *
 {
     return guarded(env, [&] {
         json printers = json::array();
-        for (auto it = g_engine.bundle->printers.begin(); it != g_engine.bundle->printers.end(); ++it) {
+        for (auto it = engine().bundle->printers.begin(); it != engine().bundle->printers.end(); ++it) {
             const Preset &p = *it;
             if (!p.is_visible)
                 continue;
@@ -317,7 +398,7 @@ JNIEXPORT jstring JNICALL
 Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSelectPresets(JNIEnv *env, jclass, jstring jprinter, jstring jfilament, jstring jprocess)
 {
     return guarded(env, [&] {
-        PresetBundle     &b        = *g_engine.bundle;
+        PresetBundle     &b        = *engine().bundle;
         const std::string printer  = to_std_string(env, jprinter);
         const std::string filament = to_std_string(env, jfilament);
         const std::string process  = to_std_string(env, jprocess);
@@ -327,6 +408,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSelectPresets(JNIEnv 
             b.printers.select_preset_by_name(printer, true);
             b.update_multi_material_filament_presets();
             b.update_compatible(PresetSelectCompatibleType::Always);
+            select_printer_defaults(b);
         }
         if (!process.empty())
             b.prints.select_preset_by_name(process, true);
@@ -378,7 +460,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSetOverrides(JNIEnv *
         json                      errors = json::object();
         for (auto it = values.begin(); it != values.end(); ++it) {
             if (it.value().is_null()) {
-                g_engine.overrides.erase(it.key());
+                engine().overrides.erase(it.key());
                 continue;
             }
             const std::string value = it.value().is_string() ? it.value().get<std::string>() : it.value().dump();
@@ -398,7 +480,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSetOverrides(JNIEnv *
                         v = joined;
                     }
                 }
-                g_engine.overrides.set_deserialize_strict(it.key(), v);
+                engine().overrides.set_deserialize_strict(it.key(), v);
             } catch (const std::exception &ex) {
                 errors[it.key()] = ex.what();
             }
@@ -411,7 +493,7 @@ JNIEXPORT jstring JNICALL
 Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeClearOverrides(JNIEnv *env, jclass)
 {
     return guarded(env, [&] {
-        g_engine.overrides.clear();
+        engine().overrides.clear();
         return ok_json(env);
     });
 }
@@ -431,11 +513,11 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeLoadModel(JNIEnv *env
 
         const DynamicPrintConfig cfg = current_config();
         for (ModelObject *src : loaded.objects) {
-            ModelObject *obj = g_engine.model.add_object(*src);
+            ModelObject *obj = engine().model.add_object(*src);
             if (obj->instances.empty())
                 obj->add_instance();
             obj->center_around_origin();
-            obj->ensure_on_bed();
+            drop_to_bed(obj);
         }
         arrange_model(cfg);
         return ok_json(env, {{"objects", objects_json()}});
@@ -455,9 +537,9 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeGetObjectMesh(JNIEnv 
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     try {
-        if (obj_idx < 0 || size_t(obj_idx) >= g_engine.model.objects.size())
+        if (obj_idx < 0 || size_t(obj_idx) >= engine().model.objects.size())
             return nullptr;
-        const TriangleMesh mesh = g_engine.model.objects[obj_idx]->raw_mesh();
+        const TriangleMesh mesh = engine().model.objects[obj_idx]->raw_mesh();
         const auto        &its  = mesh.its;
         std::vector<float> data;
         data.reserve(its.indices.size() * 18);
@@ -492,7 +574,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSetInstanceTransform(
         inst->set_rotation(Vec3d(rot.x(), rot.y(), Geometry::deg2rad(rot_z_deg)));
         inst->set_scaling_factor(Vec3d(scale, scale, scale));
         inst->set_offset(Vec3d(x, y, inst->get_offset().z()));
-        g_engine.model.objects[obj_idx]->ensure_on_bed();
+        drop_to_bed(engine().model.objects[obj_idx]);
         return ok_json(env, {{"objects", objects_json()}});
     });
 }
@@ -506,12 +588,12 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeRotateInstance(JNIEnv
         if (axis < 0 || axis > 2)
             throw Slic3r::RuntimeError("Invalid axis");
         ModelInstance *inst   = instance_at(obj_idx, inst_idx);
-        const Vec3d    center = g_engine.model.objects[obj_idx]->instance_bounding_box(size_t(inst_idx)).center();
+        const Vec3d    center = engine().model.objects[obj_idx]->instance_bounding_box(size_t(inst_idx)).center();
         const Transform3d rot = Geometry::translation_transform(center) *
                                 Transform3d(Eigen::AngleAxisd(Geometry::deg2rad(double(deg)), Vec3d::Unit(axis))) *
                                 Geometry::translation_transform(-center);
         inst->set_transformation(Geometry::Transformation(rot * inst->get_matrix()));
-        g_engine.model.objects[obj_idx]->ensure_on_bed();
+        drop_to_bed(engine().model.objects[obj_idx]);
         return ok_json(env, {{"objects", objects_json()}});
     });
 }
@@ -521,7 +603,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeAddInstance(JNIEnv *e
 {
     return guarded(env, [&] {
         ModelInstance *src = instance_at(obj_idx, 0);
-        g_engine.model.objects[obj_idx]->add_instance(*src);
+        engine().model.objects[obj_idx]->add_instance(*src);
         arrange_model(current_config());
         return ok_json(env, {{"objects", objects_json()}});
     });
@@ -531,13 +613,13 @@ JNIEXPORT jstring JNICALL
 Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeRemoveObject(JNIEnv *env, jclass, jint obj_idx)
 {
     return guarded(env, [&] {
-        if (obj_idx < 0 || size_t(obj_idx) >= g_engine.model.objects.size())
+        if (obj_idx < 0 || size_t(obj_idx) >= engine().model.objects.size())
             throw Slic3r::RuntimeError("Invalid object index");
-        ModelObject *obj = g_engine.model.objects[obj_idx];
+        ModelObject *obj = engine().model.objects[obj_idx];
         if (obj->instances.size() > 1)
             obj->delete_instance(obj->instances.size() - 1);
         else
-            g_engine.model.delete_object(size_t(obj_idx));
+            engine().model.delete_object(size_t(obj_idx));
         return ok_json(env, {{"objects", objects_json()}});
     });
 }
@@ -546,8 +628,8 @@ JNIEXPORT jstring JNICALL
 Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeClearModel(JNIEnv *env, jclass)
 {
     return guarded(env, [&] {
-        g_engine.model.clear_objects();
-        g_engine.print->clear();
+        engine().model.clear_objects();
+        engine().print->clear();
         return ok_json(env, {{"objects", json::array()}});
     });
 }
@@ -568,7 +650,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSlice(JNIEnv *env, jc
 {
     return guarded(env, [&] {
         const std::string output = to_std_string(env, joutput);
-        if (g_engine.model.objects.empty())
+        if (engine().model.objects.empty())
             throw Slic3r::RuntimeError("Add a model before slicing");
         {
             std::lock_guard<std::mutex> plock(g_progress.mutex);
@@ -581,7 +663,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSlice(JNIEnv *env, jc
         if (Preset::printer_technology(cfg) != ptFFF)
             throw Slic3r::RuntimeError("Only FFF (filament) printers are supported");
 
-        Print &print = *g_engine.print;
+        Print &print = *engine().print;
         print.set_status_callback([](const PrintBase::SlicingStatus &s) {
             std::lock_guard<std::mutex> plock(g_progress.mutex);
             if (s.percent >= 0)
@@ -595,15 +677,15 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSlice(JNIEnv *env, jc
         });
 
         // Make sure every object has an instance and sits on the bed.
-        for (ModelObject *o : g_engine.model.objects) {
+        for (ModelObject *o : engine().model.objects) {
             if (o->instances.empty())
                 o->add_instance();
-            o->ensure_on_bed();
+            drop_to_bed(o);
         }
 
         const size_t filaments = std::max<size_t>(1, cfg.option<ConfigOptionFloats>("nozzle_diameter")->values.size());
         Model::setExtruderParams(cfg, int(filaments));
-        print.apply(g_engine.model, cfg);
+        print.apply(engine().model, cfg);
         Model::setPrintSpeedTable(cfg, print.config());
 
         StringObjectException warning;
@@ -621,11 +703,11 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSlice(JNIEnv *env, jc
         struct Reset { ~Reset() { g_running_print = nullptr; } } reset;
         try {
             print.process();
-            g_engine.gcode_result.reset();
-            std::string path = print.export_gcode(output, &g_engine.gcode_result, nullptr);
+            engine().gcode_result.reset();
+            std::string path = print.export_gcode(output, &engine().gcode_result, nullptr);
 
             const auto &ps   = print.print_statistics();
-            const auto &est  = g_engine.gcode_result.print_statistics;
+            const auto &est  = engine().gcode_result.print_statistics;
             json        warns;
             {
                 std::lock_guard<std::mutex> plock(g_progress.mutex);
@@ -638,7 +720,7 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSlice(JNIEnv *env, jc
                                  {"filament_mm", ps.total_used_filament},
                                  {"filament_g", ps.total_weight},
                                  {"filament_cost", ps.total_cost},
-                                 {"layers", g_engine.gcode_result.moves.empty() ? 0 : g_engine.gcode_result.moves.back().layer_id + 1},
+                                 {"layers", engine().gcode_result.moves.empty() ? 0 : engine().gcode_result.moves.back().layer_id + 1},
                                  {"warnings", warns}});
         } catch (const CanceledException &) {
             return error_json(env, "Slicing cancelled");
@@ -666,7 +748,7 @@ JNIEXPORT jfloatArray JNICALL
 Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeGetToolpaths(JNIEnv *env, jclass)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-    const auto        &moves = g_engine.gcode_result.moves;
+    const auto        &moves = engine().gcode_result.moves;
     std::vector<float> data;
     data.reserve(moves.size() * 4);
     for (size_t i = 1; i < moves.size(); ++i) {

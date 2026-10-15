@@ -7,3 +7,4 @@ local.properties
 .idea/
 *.iml
 .cxx/
+orca-slicer-android-debug.apk

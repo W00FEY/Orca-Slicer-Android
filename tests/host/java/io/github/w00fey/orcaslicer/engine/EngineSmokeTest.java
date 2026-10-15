@@ -36,6 +36,7 @@ public final class EngineSmokeTest {
         check("printer selected", sel.contains("\"printer\":\"" + printer + "\""));
         check("has compatible filaments", !sel.contains("\"filaments\":[]"));
         check("has compatible processes", !sel.contains("\"processes\":[]"));
+        check("printer's recommended process selected", !sel.contains("\"process\":\"Default Setting\""));
         System.out.println("selection: " + abbreviate(sel));
 
         expectOk("optionKeys", NativeEngine.nativeListOptionKeys());
@@ -79,6 +80,7 @@ public final class EngineSmokeTest {
             check("G-code has layer height 0.28", text.contains("; layer_height = 0.28"));
             check("G-code has 25% infill", text.contains("; sparse_infill_density = 25%"));
             check("G-code has extrusion moves", text.contains("G1 X"));
+            check("G-code uses a vendor process", !text.contains("; print_settings_id = Default Setting"));
         } else {
             check("gcode_path reported", false);
         }

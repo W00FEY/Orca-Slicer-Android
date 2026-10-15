@@ -173,6 +173,12 @@ private fun TopBar(state: UiState, vm: AppViewModel) {
                 DropdownMenuItem(text = { Text("Change printer") }, onClick = { menu = false; vm.navigate(Screen.PRINTERS) })
                 DropdownMenuItem(text = { Text("Printer brands") }, onClick = { menu = false; vm.navigate(Screen.VENDORS) })
                 DropdownMenuItem(text = { Text("Network printer") }, onClick = { menu = false; vm.navigate(Screen.PRINT_HOST) })
+                vm.sampleModels().forEach { name ->
+                    DropdownMenuItem(
+                        text = { Text("Add sample: " + name.substringBeforeLast('.').replace('_', ' ')) },
+                        onClick = { menu = false; vm.loadSample(name) },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("About") },
                     onClick = { menu = false; vm.showMessage("Orca Slicer for Android – engine OrcaSlicer ${state.engineVersion}") },
@@ -263,6 +269,9 @@ private fun PlatePanel(state: UiState, vm: AppViewModel) {
                         "Tap a model to select it; long-press and drag to move it.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if ("3DBenchy.drc" in vm.sampleModels()) {
+                    TextButton(onClick = { vm.loadSample("3DBenchy.drc") }) { Text("Try a 3DBenchy") }
+                }
             }
         }
     }

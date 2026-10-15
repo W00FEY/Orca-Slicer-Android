@@ -61,6 +61,9 @@ jobs:
           path: build/deps-${{ env.TARGET_ABI }}/prefix
           key: ${{ steps.deps-cache.outputs.cache-primary-key }}
 
+      - name: Unit tests
+        run: ./gradlew --no-daemon testDebugUnitTest
+
       - name: Build APK
         run: ./gradlew --no-daemon assembleRelease
 

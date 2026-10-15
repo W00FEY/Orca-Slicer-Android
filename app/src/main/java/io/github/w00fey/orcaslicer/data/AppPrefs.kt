@@ -8,6 +8,7 @@ enum class HostType(val label: String) {
     OCTOPRINT("OctoPrint"),
     MOONRAKER("Klipper (Moonraker)"),
     PRUSALINK("PrusaLink"),
+    FLASHFORGE("Flashforge (Adventurer 3/4)"),
 }
 
 @Serializable

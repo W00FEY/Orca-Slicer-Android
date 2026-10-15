@@ -23,8 +23,9 @@ with the same profiles. The touch UI is new and built for phones like the Pixel 
 - **Slice** with progress and cancel, then **preview** the toolpaths coloured by feature with a
   layer slider, estimated time, and filament use and cost.
 - **Output**: save the G-code anywhere (SD card, Drive, USB drive), share it, or send it
-  straight to **OctoPrint**, **Klipper/Moonraker** (Mainsail, Fluidd) or **PrusaLink**, and
-  optionally start the print.
+  straight to **OctoPrint**, **Klipper/Moonraker** (Mainsail, Fluidd), **PrusaLink** or a
+  **Flashforge Adventurer 3 / 3 Pro / 4** (finds the printer on your Wi-Fi), and optionally
+  start the print.
 
 ## Installing on your phone
 
@@ -82,7 +83,10 @@ first run is slow.
 it from Java through the app's JNI entry points: it loads the Prusa and Creality
 profiles, imports and transforms a model, slices it and checks the G-code. Pass
 a printer name to try another profile, e.g.
-`tests/host/run.sh "Creality Ender-3 V3 SE 0.4 nozzle"`.
+`tests/host/run.sh "Flashforge Adventurer 3 Series 0.4 Nozzle"`.
+
+`./gradlew testDebugUnitTest` runs the app's JVM tests, including the Flashforge
+uploader against a simulated Adventurer 3.
 
 ### Updating OrcaSlicer
 

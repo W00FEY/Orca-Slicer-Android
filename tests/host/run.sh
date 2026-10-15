@@ -27,7 +27,7 @@ javac -d "$OUT/classes" $(find "$ROOT/tests/host/java" -name '*.java')
 
 # Install a few vendors the way the app does (vendor JSON + folder + filament library).
 PROFILES="$ROOT/third_party/OrcaSlicer/resources/profiles"
-for v in OrcaFilamentLibrary Prusa Creality; do
+for v in OrcaFilamentLibrary Prusa Creality Flashforge; do
     cp "$PROFILES/$v.json" "$OUT/work/data/system/"
     cp -r "$PROFILES/$v" "$OUT/work/data/system/"
 done

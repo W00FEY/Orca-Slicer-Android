@@ -15,10 +15,15 @@ import kotlin.coroutines.coroutineContext
 /** Uploads G-code to a network print server (OctoPrint, Moonraker or PrusaLink). */
 object PrintHostUploader {
 
-    suspend fun upload(host: PrintHost, file: File, remoteName: String, startPrint: Boolean, onProgress: (Float) -> Unit) =
+    suspend fun upload(host: PrintHost, file: File, remoteName: String, startPrint: Boolean, onProgress: (Float) -> Unit) {
+        if (host.type == HostType.FLASHFORGE) {
+            FlashforgeClient.upload(host.url, file, remoteName, startPrint, onProgress)
+            return
+        }
         withContext(Dispatchers.IO) {
             val base = normalizeUrl(host.url)
             when (host.type) {
+                HostType.FLASHFORGE -> Unit
                 HostType.OCTOPRINT -> multipart(
                     URL("$base/api/files/local"), host.apiKey, file, remoteName,
                     mapOf("print" to startPrint.toString(), "select" to startPrint.toString()), onProgress,
@@ -40,18 +45,23 @@ object PrintHostUploader {
                 }
             }
         }
+    }
 
     /** Checks that the host answers; returns a short description of the server. */
-    suspend fun test(host: PrintHost): String = withContext(Dispatchers.IO) {
+    suspend fun test(host: PrintHost): String {
+        if (host.type == HostType.FLASHFORGE) return FlashforgeClient.test(host.url)
+        return withContext(Dispatchers.IO) { testHttp(host) }
+    }
+
+    private fun testHttp(host: PrintHost): String {
         val base = normalizeUrl(host.url)
         val path = when (host.type) {
-            HostType.OCTOPRINT -> "/api/version"
+            HostType.OCTOPRINT, HostType.PRUSALINK, HostType.FLASHFORGE -> "/api/version"
             HostType.MOONRAKER -> "/server/info"
-            HostType.PRUSALINK -> "/api/version"
         }
         val conn = open(URL(base + path), host.apiKey)
         conn.requestMethod = "GET"
-        finish(conn).take(200)
+        return finish(conn).take(200)
     }
 
     private fun normalizeUrl(url: String): String {

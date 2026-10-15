@@ -6,6 +6,9 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.w00fey.orcaslicer.data.AppPrefs
+import io.github.w00fey.orcaslicer.data.FlashforgeClient
+import io.github.w00fey.orcaslicer.data.FlashforgePrinter
+import io.github.w00fey.orcaslicer.data.HostType
 import io.github.w00fey.orcaslicer.data.PrintHost
 import io.github.w00fey.orcaslicer.data.PrintHostUploader
 import io.github.w00fey.orcaslicer.data.ResourceInstaller
@@ -450,9 +453,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun testPrintHost(host: PrintHost) = action("Connecting…") {
-        PrintHostUploader.test(host)
-        showMessage("Connected to ${host.type.label}")
+        val info = PrintHostUploader.test(host)
+        showMessage(if (host.type == HostType.FLASHFORGE) "Connected: $info" else "Connected to ${host.type.label}")
     }
+
+    /** Looks for Flashforge printers on the Wi-Fi network. */
+    suspend fun discoverFlashforge(): List<FlashforgePrinter> =
+        try {
+            FlashforgeClient.discover(getApplication())
+        } catch (e: Throwable) {
+            showMessage("Search failed: ${e.message}")
+            emptyList()
+        }
 
     fun sendToPrinter(startPrint: Boolean) {
         val host = _state.value.printHost
@@ -468,7 +480,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(uploadProgress = 0f) }
             try {
-                PrintHostUploader.upload(host, file, file.name, startPrint) { p ->
+                val remote = if (host.type == HostType.FLASHFORGE) FlashforgeClient.sanitize(file.name) else file.name
+                PrintHostUploader.upload(host, file, remote, startPrint) { p ->
                     _state.update { it.copy(uploadProgress = p) }
                 }
                 showMessage(if (startPrint) "Uploaded, print started" else "Uploaded to printer")

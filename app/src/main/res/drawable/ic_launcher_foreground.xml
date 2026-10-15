@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stylised layered print on a build plate. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:pathData="M30,72h48v4h-48z" />
+    <path android:fillColor="#B2DFDB" android:pathData="M36,64h36v5h-36z" />
+    <path android:fillColor="#E0F2F1" android:pathData="M40,56h28v5h-28z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M44,48h20v5h-20z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M50,30h8l-2,8h-4z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M53,38h2v6h-2z" />
+</vector>

@@ -7,10 +7,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ABI="${1:-arm64-v8a}"
 API="${ANDROID_API:-29}"
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
-if [ -z "$NDK" ] && [ -n "$SDK" ]; then
+# Prefer the pinned NDK (same as Gradle's ndkVersion) over whatever
+# ANDROID_NDK_HOME points to, so dependencies and app use one toolchain.
+NDK=""
+if [ -n "$SDK" ] && [ -d "$SDK/ndk/$(cat "$ROOT/NDK_VERSION")" ]; then
     NDK="$SDK/ndk/$(cat "$ROOT/NDK_VERSION")"
 fi
+NDK="${NDK:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
 if [ ! -f "$NDK/build/cmake/android.toolchain.cmake" ]; then
     echo "Android NDK not found. Set ANDROID_NDK_HOME or ANDROID_HOME." >&2
     exit 1

@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
-      ABI: arm64-v8a
+      TARGET_ABI: arm64-v8a
     steps:
       - uses: actions/checkout@v4
 
@@ -37,21 +37,21 @@ jobs:
         id: deps-cache
         uses: actions/cache/restore@v4
         with:
-          path: build/deps-${{ env.ABI }}/prefix
-          key: deps-${{ env.ABI }}-${{ hashFiles('native/deps/**', 'ORCA_VERSION', 'NDK_VERSION') }}
+          path: build/deps-${{ env.TARGET_ABI }}/prefix
+          key: deps-${{ env.TARGET_ABI }}-${{ hashFiles('native/deps/**', 'ORCA_VERSION', 'NDK_VERSION') }}
 
       - name: Build dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
-          scripts/build_deps.sh "$ABI"
+          scripts/build_deps.sh "$TARGET_ABI"
           # Keep only the install prefix; the build trees are several GB.
-          find "build/deps-$ABI" -mindepth 1 -maxdepth 1 ! -name prefix -exec rm -rf {} +
+          find "build/deps-$TARGET_ABI" -mindepth 1 -maxdepth 1 ! -name prefix -exec rm -rf {} +
 
       - name: Save dependency cache
         if: steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: build/deps-${{ env.ABI }}/prefix
+          path: build/deps-${{ env.TARGET_ABI }}/prefix
           key: ${{ steps.deps-cache.outputs.cache-primary-key }}
 
       - name: Build APK
@@ -60,7 +60,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: orca-slicer-android-${{ env.ABI }}
+          name: orca-slicer-android-${{ env.TARGET_ABI }}
           path: app/build/outputs/apk/release/*.apk
 
       - name: Publish release

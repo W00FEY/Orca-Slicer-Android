@@ -64,7 +64,8 @@ if(ANDROID)
         message(FATAL_ERROR "Unsupported ANDROID_ABI: ${ANDROID_ABI} (use arm64-v8a or x86_64)")
     endif()
     set(ANDROID_API_LEVEL ${ANDROID_PLATFORM_LEVEL})
-    set(AT_ENV env
+    # GMP's configure reads $ABI as its own setting; make sure a stray one can't leak in.
+    set(AT_ENV env -u ABI
         "PATH=${NDK_BIN}:$ENV{PATH}"
         "CC=${NDK_BIN}/${ANDROID_TRIPLE}${ANDROID_API_LEVEL}-clang"
         "CXX=${NDK_BIN}/${ANDROID_TRIPLE}${ANDROID_API_LEVEL}-clang++"
@@ -75,7 +76,7 @@ if(ANDROID)
     set(OPENSSL_ENV env "PATH=${NDK_BIN}:$ENV{PATH}" "ANDROID_NDK_ROOT=${ANDROID_NDK}" "ANDROID_NDK_HOME=${ANDROID_NDK}")
     set(OPENSSL_CONFIGURE ./Configure ${OPENSSL_TARGET} -D__ANDROID_API__=${ANDROID_API_LEVEL})
 else()
-    set(AT_ENV env "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}" ${AT_FLAGS})
+    set(AT_ENV env -u ABI "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}" ${AT_FLAGS})
     set(AT_HOST_ARG "")
     set(OPENSSL_ENV env "CC=${CMAKE_C_COMPILER}")
     set(OPENSSL_CONFIGURE ./config)

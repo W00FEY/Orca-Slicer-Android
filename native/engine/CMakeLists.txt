@@ -17,7 +17,12 @@ endif()
 project(OrcaEngine C CXX)
 
 set(ORCA_SOURCE_DIR "" CACHE PATH "OrcaSlicer source checkout")
-set(ORCA_DEPS_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/../../build/deps-${ANDROID_ABI}/prefix" CACHE PATH "Android dependency install prefix")
+if(ANDROID)
+    set(_default_prefix "${CMAKE_CURRENT_SOURCE_DIR}/../../build/deps-${ANDROID_ABI}/prefix")
+else()
+    set(_default_prefix "${CMAKE_CURRENT_SOURCE_DIR}/../../build/deps-host/prefix")
+endif()
+set(ORCA_DEPS_PREFIX "${_default_prefix}" CACHE PATH "Dependency install prefix")
 foreach(_v ORCA_SOURCE_DIR ORCA_DEPS_PREFIX)
     if(NOT EXISTS "${${_v}}")
         message(FATAL_ERROR "${_v} is not set or does not exist (${${_v}}). "
@@ -26,12 +31,10 @@ foreach(_v ORCA_SOURCE_DIR ORCA_DEPS_PREFIX)
     get_filename_component(${_v} "${${_v}}" ABSOLUTE)
 endforeach()
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
-endif()
-# Debug builds of libslic3r are unusably slow on a phone; always optimise.
-set(CMAKE_C_FLAGS_DEBUG "-O2 -g")
-set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
+# Debug builds of libslic3r are unusably slow on a phone, and the dependencies
+# only ship release libraries, so the engine is always built as Release (this
+# also applies to Gradle's debug variant).
+set(CMAKE_BUILD_TYPE Release)
 
 # libslic3r derives the OCCT config path from CMAKE_PREFIX_PATH, so it must be a single entry.
 set(CMAKE_PREFIX_PATH "${ORCA_DEPS_PREFIX}")
@@ -123,5 +126,12 @@ add_library(orca_jni SHARED
     jni/NanoSvg.cpp
 )
 target_include_directories(orca_jni PRIVATE ${LIBDIR} ${LIBDIR_BIN}/libslic3r)
-target_link_libraries(orca_jni PRIVATE libslic3r boost_libs android log)
+target_link_libraries(orca_jni PRIVATE libslic3r boost_libs)
+if(ANDROID)
+    target_link_libraries(orca_jni PRIVATE android log)
+else()
+    # Host build for tests/host: JNI headers come from the local JDK.
+    find_package(JNI REQUIRED)
+    target_include_directories(orca_jni PRIVATE ${JNI_INCLUDE_DIRS})
+endif()
 target_link_options(orca_jni PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL)

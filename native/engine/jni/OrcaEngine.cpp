@@ -7,8 +7,16 @@
 
 #include "JniUtils.hpp"
 
-#include <android/log.h>
 #include <jni.h>
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#else
+// Host builds (tests/host) log to stderr instead of logcat.
+#include <cstdio>
+#define ANDROID_LOG_ERROR 6
+#define __android_log_print(prio, tag, ...) (std::fprintf(stderr, "%s: ", tag), std::fprintf(stderr, __VA_ARGS__), std::fprintf(stderr, "\n"))
+#endif
 
 #include <atomic>
 #include <cmath>

@@ -49,6 +49,8 @@ public final class EngineSmokeTest {
         expectOk("setOverrides", ov);
         check("invalid override reported", ov.contains("\"wall_loops\""));
         check("valid overrides accepted", !ov.contains("\"layer_height\":\""));
+        String walls = NativeEngine.nativeGetOptions("[\"wall_loops\"]");
+        check("rejected override leaves the preset value", walls.contains("\"overridden\":false") && !walls.contains("\"value\":\"0\""));
 
         Path stl = work.resolve("cube.stl");
         writeCube(stl, 20f);
@@ -81,6 +83,7 @@ public final class EngineSmokeTest {
             check("G-code has 25% infill", text.contains("; sparse_infill_density = 25%"));
             check("G-code has extrusion moves", text.contains("G1 X"));
             check("G-code uses a vendor process", !text.contains("; print_settings_id = Default Setting"));
+            check("G-code has walls", !text.contains("; wall_loops = 0"));
         } else {
             check("gcode_path reported", false);
         }

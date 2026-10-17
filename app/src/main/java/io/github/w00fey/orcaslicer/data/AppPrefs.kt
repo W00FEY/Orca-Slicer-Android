@@ -43,6 +43,11 @@ class AppPrefs(context: Context) {
         } ?: emptyMap()
         set(value) = prefs.edit().putString("overrides", json.encodeToString(value)).apply()
 
+    /** Output .gx instead of .gcode; null means "decide from the printer" (Flashforge Adventurer → .gx). */
+    var gxFormat: Boolean?
+        get() = if (prefs.contains("gx_format")) prefs.getBoolean("gx_format", false) else null
+        set(value) = prefs.edit().apply { if (value == null) remove("gx_format") else putBoolean("gx_format", value) }.apply()
+
     var printHost: PrintHost
         get() = prefs.getString("print_host", null)?.let {
             runCatching { json.decodeFromString<PrintHost>(it) }.getOrNull()

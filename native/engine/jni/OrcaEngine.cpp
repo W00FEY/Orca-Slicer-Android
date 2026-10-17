@@ -480,7 +480,11 @@ Java_io_github_w00fey_orcaslicer_engine_NativeEngine_nativeSetOverrides(JNIEnv *
                         v = joined;
                     }
                 }
-                engine().overrides.set_deserialize_strict(it.key(), v);
+                // Parse into a scratch config first: a value that fails to parse
+                // would otherwise leave a default (e.g. 0 walls) in the overrides.
+                DynamicPrintConfig parsed;
+                parsed.set_deserialize_strict(it.key(), v);
+                engine().overrides.apply(parsed, true);
             } catch (const std::exception &ex) {
                 errors[it.key()] = ex.what();
             }

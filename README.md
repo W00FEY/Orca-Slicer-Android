@@ -26,6 +26,8 @@ with the same profiles. The touch UI is new and built for phones like the Pixel 
   straight to **OctoPrint**, **Klipper/Moonraker** (Mainsail, Fluidd), **PrusaLink** or a
   **Flashforge Adventurer 3 / 3 Pro / 4** (finds the printer on your Wi-Fi), and optionally
   start the print.
+- **Flashforge .gx output**: for Adventurer-type printers the app also writes FlashPrint's
+  `.gx` format, so the printer's screen shows a thumbnail, print time and filament use.
 
 ## Installing on your phone
 

@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.w00fey.orcaslicer.data.AppPrefs
 import io.github.w00fey.orcaslicer.data.FlashforgeClient
 import io.github.w00fey.orcaslicer.data.FlashforgePrinter
+import io.github.w00fey.orcaslicer.data.GxWriter
 import io.github.w00fey.orcaslicer.data.HostType
 import io.github.w00fey.orcaslicer.data.PrintHost
 import io.github.w00fey.orcaslicer.data.PrintHostUploader
@@ -23,6 +24,7 @@ import io.github.w00fey.orcaslicer.engine.SliceProgress
 import io.github.w00fey.orcaslicer.engine.SliceResult
 import io.github.w00fey.orcaslicer.render.PlateRenderer
 import io.github.w00fey.orcaslicer.render.SceneInstance
+import io.github.w00fey.orcaslicer.render.ThumbnailRenderer
 import io.github.w00fey.orcaslicer.render.Toolpaths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,6 +61,10 @@ data class UiState(
     val overrides: Map<String, String> = emptyMap(),
     val printHost: PrintHost = PrintHost(),
     val uploadProgress: Float? = null,
+    /** The selected printer reads Flashforge .gx files. */
+    val gxAvailable: Boolean = false,
+    /** Save/share/send the .gx file instead of plain .gcode. */
+    val gxFormat: Boolean = false,
     val message: String? = null,
 )
 
@@ -74,6 +80,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var sliceJob: Job? = null
     private var optionKeys: OptionKeys? = null
     private var pendingImports: List<Uri> = emptyList()
+    /** Object meshes as last loaded into the renderer, reused for .gx thumbnails. */
+    private var meshCache: Map<Int, FloatArray> = emptyMap()
 
     init {
         viewModelScope.launch { start() }
@@ -119,6 +127,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         applyBed(selection)
+        updateGxFlags(selection.printer)
         refreshScene(reloadMeshes = true)
         if (pendingImports.isNotEmpty()) {
             val uris = pendingImports
@@ -207,6 +216,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.printer = selection.printer
         prefs.filament = selection.filament
         prefs.process = selection.process
+        updateGxFlags(selection.printer)
+    }
+
+    private fun updateGxFlags(printer: String) {
+        val available = isLegacyFlashforge(printer)
+        _state.update { it.copy(gxAvailable = available, gxFormat = available && (prefs.gxFormat ?: true)) }
+    }
+
+    fun setGxFormat(enabled: Boolean) {
+        prefs.gxFormat = enabled
+        _state.update { it.copy(gxFormat = it.gxAvailable && enabled) }
     }
 
     private fun applyBed(selection: Selection) {
@@ -313,6 +333,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         renderer.selected = _state.value.selected
         if (reloadMeshes) {
             val meshes = HashMap<Int, FloatArray>()
+            meshCache = meshes
             for (i in objects.indices) OrcaEngine.getObjectMesh(i)?.let { meshes[i] = it }
             renderer.setMeshes(meshes)
         }
@@ -406,6 +427,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 dir.listFiles()?.forEach { it.delete() }
                 val name = (_state.value.objects.firstOrNull()?.name ?: "plate").substringBeforeLast('.')
                 val result = OrcaEngine.slice(File(dir, "${sanitize(name)}.gcode"))
+                if (_state.value.gxAvailable) writeGx(result)
                 _state.update { it.copy(slicing = SliceProgress(100, "Building preview")) }
                 val paths = withContext(Dispatchers.Default) { Toolpaths.fromSegments(OrcaEngine.toolpaths()) }
                 renderer.setToolpaths(paths)
@@ -435,14 +457,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun gcodeFile(): File? = _state.value.sliceResult?.gcodePath?.let(::File)?.takeIf { it.isFile }
 
+    /** The file to save, share or send: the .gx version when that format is selected. */
+    fun outputFile(): File? {
+        val gcode = gcodeFile() ?: return null
+        if (!_state.value.gxFormat) return gcode
+        return gxFileFor(gcode).takeIf { it.isFile } ?: gcode
+    }
+
+    private fun gxFileFor(gcode: File) = File(gcode.parentFile, gcode.nameWithoutExtension + ".gx")
+
+    /** Writes a Flashforge .gx next to the G-code, with a thumbnail of the plate as sliced. */
+    private suspend fun writeGx(result: SliceResult) = withContext(Dispatchers.Default) {
+        try {
+            val gcode = File(result.gcodePath)
+            val parts = _state.value.objects.flatMapIndexed { oi, obj ->
+                val mesh = meshCache[oi] ?: return@flatMapIndexed emptyList()
+                obj.instances.map { ThumbnailRenderer.Part(mesh, PlateRenderer.matrixFrom(it.matrix)) }
+            }
+            val thumb = ThumbnailRenderer.render(parts, GxWriter.THUMB_WIDTH, GxWriter.THUMB_HEIGHT)
+            val info = GxWriter.infoFromGcode(gcode, result.printTimeS, result.filamentMm)
+            GxWriter.write(gcode, gxFileFor(gcode), info, thumb)
+        } catch (e: Throwable) {
+            showMessage("Could not create the .gx file: ${e.message}")
+        }
+    }
+
     fun exportGcode(target: Uri) = action("Saving…") {
-        val src = gcodeFile() ?: error("Nothing to save. Slice first.")
+        val src = outputFile() ?: error("Nothing to save. Slice first.")
         withContext(Dispatchers.IO) {
             getApplication<Application>().contentResolver.openOutputStream(target)?.use { out ->
                 src.inputStream().use { it.copyTo(out) }
             } ?: error("Could not write file")
         }
-        showMessage("G-code saved")
+        showMessage(if (src.extension == "gx") ".gx file saved" else "G-code saved")
     }
 
     // ------------------------------------------------------------ print host
@@ -468,7 +515,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun sendToPrinter(startPrint: Boolean) {
         val host = _state.value.printHost
-        val file = gcodeFile()
+        val file = outputFile()
         if (!host.isConfigured) {
             navigate(Screen.PRINT_HOST)
             return

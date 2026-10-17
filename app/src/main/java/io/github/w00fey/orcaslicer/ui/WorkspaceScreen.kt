@@ -53,6 +53,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -391,7 +392,11 @@ private fun PreviewPanel(state: UiState, vm: AppViewModel) {
     val context = LocalContext.current
     var showLegend by remember { mutableStateOf(false) }
     var confirmSend by remember { mutableStateOf(false) }
-    val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/x.gcode")) { uri ->
+    val gcodeSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/x.gcode")) { uri ->
+        if (uri != null) vm.exportGcode(uri)
+    }
+    // .gx is binary; a generic type keeps file managers from appending ".txt".
+    val gxSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) vm.exportGcode(uri)
     }
 
@@ -426,15 +431,33 @@ private fun PreviewPanel(state: UiState, vm: AppViewModel) {
                     )
                 }
             }
+            if (state.gxAvailable) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("File format", style = MaterialTheme.typography.labelLarge)
+                    FilterChip(
+                        selected = state.gxFormat,
+                        onClick = { vm.setGxFormat(true) },
+                        label = { Text(".gx (Flashforge)") },
+                    )
+                    FilterChip(
+                        selected = !state.gxFormat,
+                        onClick = { vm.setGxFormat(false) },
+                        label = { Text(".gcode") },
+                    )
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { showLegend = !showLegend }) { Text(if (showLegend) "Hide legend" else "Legend") }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { vm.gcodeFile()?.let { saver.launch(it.name) } }) { Icon(Icons.Default.Save, "Save G-code") }
                 IconButton(onClick = {
-                    val file = vm.gcodeFile() ?: return@IconButton
+                    val file = vm.outputFile() ?: return@IconButton
+                    if (file.extension == "gx") gxSaver.launch(file.name) else gcodeSaver.launch(file.name)
+                }) { Icon(Icons.Default.Save, "Save file") }
+                IconButton(onClick = {
+                    val file = vm.outputFile() ?: return@IconButton
                     val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
                     val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/x.gcode"
+                        type = if (file.extension == "gx") "application/octet-stream" else "text/x.gcode"
                         putExtra(Intent.EXTRA_STREAM, uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
